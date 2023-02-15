@@ -1,0 +1,61 @@
+---
+mapping:
+  SECRET_KEY: "$RELEASE_ENV_ID"
+  SITE_URL: "$WEB_INGRESS_URL"
+defaults:
+- key: DATABASE_URL
+  value: postgres://posthog:posthog@db:5432/posthog
+- key: DEBUG
+  value: false
+- key: DISABLE_PAID_FEATURE_SHOWCASING
+  value: true
+- key: DISABLE_SECURE_SSL_REDIRECT
+  value: true
+- key: CLICKHOUSE_HOST
+  value: clickhouse
+- key: CLICKHOUSE_DATABASE
+  value: posthog
+- key: CLICKHOUSE_SECURE
+  value: 'false'
+- key: CLICKHOUSE_VERIFY
+  value: 'false'
+- key: KAFKA_URL
+  value: kafka://kafka
+- key: KAFKA_HOSTS
+  value: kafka:9092
+- key: REDIS_URL
+  value: redis://redis:6379/
+- key: DEPLOYMENT
+  value: hobby
+services:
+  clickhouse: []
+  db:
+  - key: POSTGRES_USER
+    value: posthog
+  - key: POSTGRES_DB
+    value: posthog
+  - key: POSTGRES_PASSWORD
+    value: posthog
+  kafka:
+  - key: KAFKA_BROKER_ID
+    value: 1001
+  - key: KAFKA_CFG_RESERVED_BROKER_MAX_ID
+    value: 1001
+  - key: KAFKA_CFG_LISTENERS
+    value: PLAINTEXT://:9092
+  - key: KAFKA_CFG_ADVERTISED_LISTENERS
+    value: PLAINTEXT://kafka:9092
+  - key: KAFKA_CFG_ZOOKEEPER_CONNECT
+    value: zookeeper:2181
+  - key: ALLOW_PLAINTEXT_LISTENER
+    value: 'true'
+  maildev: []
+  plugins: []
+  redis: []
+  web:
+  - key: SECURE_COOKIES
+    value: true
+  - key: IS_BEHIND_PROXY
+    value: true
+  worker: []
+  zookeeper: []

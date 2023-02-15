@@ -1,0 +1,205 @@
+---
+auto_deploy: true
+context: release-handsup-us-east-1
+domain: releaseapp.gethandsup.com
+repo_name: releasehub-samples/posthog
+hostnames:
+- clickhouse: clickhouse-${env_id}.${domain}
+- maildev: maildev-${env_id}.${domain}
+- object-storage: object-storage-${env_id}.${domain}
+- plugins: plugins-${env_id}.${domain}
+- web: web-${env_id}.${domain}
+environment_templates:
+- name: ephemeral
+- name: permanent
+resources:
+  cpu:
+    limits: 1000m
+    requests: 100m
+  memory:
+    limits: 1Gi
+    requests: 100Mi
+  replicas: 1
+services:
+- name: clickhouse
+  image: clickhouse/clickhouse-server:22.8
+  has_repo: false
+  volumes: []
+  configmap:
+  - mount_path: "/etc/clickhouse-server/config.xml"
+    repo_path: "././docker/clickhouse/config.xml"
+    name: config-xml
+  - mount_path: "/etc/clickhouse-server/users.xml"
+    repo_path: "././docker/clickhouse/users-dev.xml"
+    name: users-xml
+  ports:
+  - type: node_port
+    target_port: '8123'
+    port: '8123'
+    loadbalancer: false
+  - type: node_port
+    target_port: '9000'
+    port: '9000'
+    loadbalancer: false
+  - type: node_port
+    target_port: '9440'
+    port: '9440'
+    loadbalancer: false
+  - type: node_port
+    target_port: '9009'
+    port: '9009'
+    loadbalancer: false
+- name: db
+  image: postgres:12-alpine
+  has_repo: false
+  ports:
+  - type: node_port
+    target_port: '5432'
+    port: '5432'
+    loadbalancer: false
+- name: kafka
+  image: bitnami/kafka:2.8.1-debian-10-r99
+  has_repo: false
+  ports:
+  - type: node_port
+    target_port: '9092'
+    port: '9092'
+    loadbalancer: false
+- name: maildev
+  image: maildev/maildev:2.0.5
+  has_repo: false
+  ports:
+  - type: node_port
+    target_port: '1080'
+    port: '1080'
+    loadbalancer: false
+  - type: node_port
+    target_port: '1025'
+    port: '1025'
+    loadbalancer: false
+- name: object-storage
+  image: minio/minio:RELEASE.2022-06-25T15-50-16Z
+  has_repo: false
+  command:
+  - "/bin/sh"
+  - "-c"
+  - mkdir -p /data/posthog && minio server --address ":19000" --console-address ":19001"
+    /data
+  ports:
+  - type: node_port
+    target_port: '19000'
+    port: '19000'
+    loadbalancer: false
+  - type: node_port
+    target_port: '19001'
+    port: '19001'
+    loadbalancer: false
+- name: plugins
+  image: releasehub-samples/posthog/web
+  has_repo: true
+  memory:
+    limits: 2Gi
+    requests: 1Gi
+  command:
+  - "/bin/sh"
+  - "-c"
+  - cd plugin-server && npm run start:dist
+  args:
+  - "./bin/docker"
+  ports:
+  - type: node_port
+    target_port: '8000'
+    port: '8000'
+    loadbalancer: false
+  - type: node_port
+    target_port: '8001'
+    port: '8001'
+    loadbalancer: false
+- name: redis
+  image: redis:6.2.7-alpine
+  has_repo: false
+  ports:
+  - type: node_port
+    target_port: '6379'
+    port: '6379'
+    loadbalancer: false
+- name: web
+  image: releasehub-samples/posthog/web
+  has_repo: true
+  command:
+  - "./bin/docker-server"
+  ports:
+  - type: node_port
+    target_port: '8000'
+    port: '8000'
+    loadbalancer: false
+  - type: node_port
+    target_port: '8001'
+    port: '8001'
+    loadbalancer: false
+- name: worker
+  image: releasehub-samples/posthog/web
+  build:
+    context: "."
+  has_repo: true
+  command:
+  - "./bin/docker-worker-celery"
+  - "--with-scheduler"
+  ports:
+  - type: node_port
+    target_port: '8001'
+    port: '8001'
+    loadbalancer: false
+- name: zookeeper
+  image: zookeeper:3.7.0
+  has_repo: false
+  ports:
+  - type: node_port
+    target_port: '2181'
+    port: '2181'
+jobs:
+- name: migrations
+  from_services: web
+  command:
+  - "./bin/migrate"
+- name: asyncmigrationscheck
+  from_services: web
+  command:
+  - "/bin/sh"
+  - "-c"
+  - python manage.py run_async_migrations --check
+workflows:
+- name: setup
+  parallelize:
+  - step: prerequisites
+    tasks:
+    - services.db
+    - services.redis
+    - services.zookeeper
+    - services.clickhouse
+  - step: middleware
+    tasks:
+    - jobs.migrations
+    - services.kafka
+    - services.maildev
+    - services.object-storage
+  - step: services-0
+    tasks:
+    - services.plugins
+    - services.web
+    - services.worker
+- name: patch
+  parallelize:
+  - step: middleware
+    tasks:
+    - jobs.migrations
+  - step: services-0
+    tasks:
+    - services.plugins
+    - services.web
+    - services.worker
+- name: teardown
+  parallelize:
+  - step: remove-environment
+    tasks:
+    - release.remove_environment
